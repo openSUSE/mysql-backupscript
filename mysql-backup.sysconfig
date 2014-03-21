@@ -1,0 +1,62 @@
+## Path:    System/Backup
+## Description:
+## Type:    yesno
+## Default: yes
+#
+# Start backup script.
+#
+START_BACKUP="yes"
+
+## Type:    string
+## Default: /root/backup/db
+#
+# Place where the database backup files should be 
+# stored. The path will be created if it doesn't 
+# exist. 
+#
+BACKUPDIR="/root/backup/db"
+
+## Type:    string
+## Default: root@localhost
+#
+# Email address to send errors.
+#
+EMAIL="root@localhost"
+
+## Type:    string
+## Default: /var/log/mysql-backup.log
+#
+# Logfile
+#
+LOGFILE="/var/log/mysql-backup.log"
+
+## Type:	integer
+## Default: 14
+#
+# Retention period for storing old backup files.
+# Files older than this value in $BACKUPDIR will
+# be deleted.
+# Set to '0' if you want to store all backups.
+#
+RETENTION=14
+
+## Type:    yesno
+## Default: no
+#
+# The script can try to repair and optimize the databases/tables
+# automatically after a successful backup. It uses mysqlcheck for 
+# all databases to do this.
+#
+OPTIMIZE_DB="no"
+
+## Type:    list(yes,no,skip)
+## Default: yes
+#
+# Should the BACKUPDIR created if it does not exist?
+#  yes  : the script will create the backup directory
+#  no   : the script will abort and create an Email alert if the
+#         backup directory does not exist
+#  skip : the script will silently abort - useful if you run a 
+#         HA setup for the database
+#
+CREATE_BACKUPDIR="yes"

@@ -1,0 +1,213 @@
+#!/bin/bash
+# Simple backupscript for MySQL databases
+# Author: Lars Vogdt
+# BSD4 License
+#
+# $Id$
+#
+
+PATH=/bin:/usr/bin
+MAILX="/usr/bin/mail"
+MYSQL_CHECK="/usr/bin/mysqlcheck"
+MYSQLADMIN="/usr/bin/mysqladmin"
+MYSQLDUMP="/usr/bin/mysqldump"
+MYSQL="/usr/bin/mysql"
+DISTCONFIG="/etc/sysconfig/mysql-backupscript"
+##################################################
+# Default/Fallback values
+# Don't change them here! Use $DISCONFIG instead
+##################################################
+BACKUPDIR="/root/backup/db"
+FQHOSTNAME=`hostname -f`
+HOST=$(hostname -s 2>/dev/null)
+LOGNAME="mysql-backup"
+LOGFILE="/var/log/${LOGNAME}.log"
+EMAIL="root@localhost"
+START_BACKUP="yes"
+OPTIMIZE_DB="no"
+##################################################
+umask 027
+unset LANG;
+
+function cleanup_and_exit(){
+	test -n "$TMPFILE" -a -f "$TMPFILE" && rm "$TMPFILE"
+	exit $1
+}
+
+function LOG(){
+        local MESSAGE="$1"
+        local LOG_DATE=$(date "+%b %d %H:%M:%S")
+        if [ -z "$LOGFILE" ]; then
+            echo "ERROR: LOGFILE is not defined" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+            cleanup_and_exit 1
+        fi
+        if [ ! -d "$LOGDIR" ]; then
+                mkdir -p "$LOGDIR" || exit 1
+                echo "$LOG_DATE $HOST $LOGNAME[$$]: function LOG created $LOGDIR" > "$LOGFILE"
+        fi
+        echo "$LOG_DATE $HOST $LOGNAME[$$]: $MESSAGE" >> $LOGFILE || DEBUG="yes"
+        if [ "$DEBUG" = "yes" ]; then
+            echo "DEBUG:    $MESSAGE"
+        fi	
+}
+
+function test_mysql_alive(){
+	local tmpfile="$1"
+	if [ -x "$MYSQLADMIN" ]; then
+		"$MYSQLADMIN" ping 1>/dev/null 2>>"$tmpfile"
+		if [ -s "$tmpfile" ]; then
+			echo "ERROR: $(cat "$tmpfile")" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+			LOG $(cat "$tmpfile")
+			cleanup_and_exit 1
+		fi
+	elif [ -x "$MYSQL" ]; then
+		"$MYSQL" -e "SHOW DATABASES;" >/dev/null 2>>"$tmpfile"
+		if [ $? != 0 ]; then
+            echo "ERROR: $(cat "$tmpfile")" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+            LOG $(cat "$tmpfile")
+            cleanup_and_exit 1
+        fi
+	else
+		echo "Could neither execute $MYSQLADMIN nor $MYSQL" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+		LOG "ERROR: Could neither execute $MYSQLADMIN nor $MYSQL"
+		cleanup_and_exit 1
+	fi
+	if [ ! -x "$MYSQLDUMP" ]; then
+		echo "ERROR: Could not execute $MYSQLDUMP" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+		LOG "ERROR: Could not execute $MYSQLDUMP"
+		cleanup_and_exit 1
+	fi
+}
+
+function optimize() {
+	if [ -x "$MYSQL_CHECK" ]; then
+		LOG "Starting automatic repair and optimization of the databases/tables"
+		"$MYSQL_CHECK" 	\
+					--all-databases \
+					--compress \
+					--auto-repair \
+					--optimize \
+					-u root 1>/dev/null 2>"$TMPFILE" 
+		"$MYSQL" -e "FLUSH QUERY CACHE;" 2>>"$TMPFILE"
+	fi
+}
+
+function print_help(){
+	echo "Usage: $(basename $0) [-c <configfile>]"
+	echo 
+	echo "       -h              : print this message"
+	echo "       -c <configfile> : use the given config file instead of $DISTCONFIG"
+	echo
+	echo " The target of this script is to create backups of your mysql databases"
+	echo " on a regular daily bases."
+	echo " Please find the configuration details in $DISTCONFIG - if you want to"
+	echo " test something, the option -f might be useful to use another file containing"
+	echo " the configuration."
+	echo
+	echo " PLEASE NOTE: "
+	echo "  Please have a look at __READMEFILE__"
+	echo "  as this contains information for password protected databases and further"
+	echo "  details."
+	exit 0
+}
+
+trap cleanup_and_exit 0 1 2 3 7 13 15
+
+while getopts 'hc:'  OPTION ; do
+    case $OPTION in
+        h) print_help
+        ;;
+        c) DISTCONFIG="$OPTARG"
+        ;;
+	esac
+done
+shift $(( OPTIND - 1 ))
+
+# source our config
+if [ -f "$DISTCONFIG" ]; then
+    . "$DISTCONFIG"
+    LOGDIR=$(dirname "$LOGFILE")
+else
+    echo "$DISTCONFIG not found - using defaults" >&2
+    LOGDIR=$(dirname "$LOGFILE")
+    LOG "$DISTCONFIG not found - using defaults"
+fi
+
+case "$START_BACKUP" in
+  [Yy]*)
+    DATE=$(date "+%Y%m%d")
+    TMPFILE=$(mktemp /tmp/mysql-backupscript-XXXXXX)
+    if [ ! -d "$BACKUPDIR" ]; then
+        case "$CREATE_BACKUPDIR" in 
+            [Nn][Oo])
+                echo "ERROR: $BACKUPDIR does not exist. Exiting as CREATE_BACKUPDIR is set to 'no' in $DISTCONFIG" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+                LOG "ERROR: $BACKUPDIR does not exist. Exiting as CREATE_BACKUPDIR is set to 'no' in $DISTCONFIG"
+                cleanup_and_exit 1
+            ;;
+            [Ss][Kk][Ii][Pp])
+                cleanup_and_exit 0
+            ;;
+            *)
+                mkdir -p "$BACKUPDIR"
+            ;;
+        esac
+    fi
+    if [ -d "$BACKUPDIR/$DATE" ]; then
+    	echo "ERROR: $BACKUPDIR/$DATE exists" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+        LOG "$BACKUPDIR/$DATE already exists - aborting backup"
+        cleanup_and_exit 1
+    else
+        mkdir -p "$BACKUPDIR/$DATE" 2>"$TMPFILE" || { 
+            echo "ERROR: $(cat "$TMPFILE")" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL;
+            LOG "$(cat "$TMPFILE")"
+            cleanup_and_exit 1
+        }
+    fi
+    pushd "$BACKUPDIR/$DATE" 1>/dev/null
+	LOG "Creating backup of my.cnf"
+	test -f /etc/my.cnf && cp /etc/my.cnf .
+	test_mysql_alive "$TMPFILE"
+	"$MYSQL" -e "FLUSH LOGS;" 2>"$TMPFILE"
+	# start the real backup
+    for db in `"$MYSQL" -e "SHOW DATABASES;" 2>>"$TMPFILE" | tail -n +2 | grep -v information_schema`; do
+        if [ -s "$TMPFILE" ]; then
+            echo "MYSQLERROR: $(cat "$TMPFILE")" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+            LOG "$(cat "$TMPFILE")"
+            cleanup_and_exit 1
+        fi
+        LOG "Creating backup of $db"
+        echo "-- " >> "$db.sql"
+        echo "-- $db backup from $FQHOSTNAME on $DATE" > "$db.sql"
+        echo "-- " >> "$db.sql"
+        echo "" >> "$db.sql"
+        echo "DROP DATABASE IF EXISTS \`$db\`;" >> "$db.sql"
+        echo "CREATE DATABASE \`$db\` DEFAULT CHARACTER SET utf8;" >> "$db.sql"
+        echo "USE \`$db\`;" >> "$db.sql"
+        echo "" >> "$db.sql"
+        "$MYSQLDUMP" --opt --quote-names --default-character-set=utf8 "$db" >> "$db.sql"
+        bzip2 "$db.sql"
+        chmod 640 $db.sql*
+    done
+    case "$OPTIMIZE_DB" in
+        [Yy][Ee][Ss])
+            optimize
+        ;;
+    esac
+    if [ -s "$TMPFILE" ]; then
+        echo "MYSQLERROR: $(cat "$TMPFILE")" | $MAILX -s "[$LOGNAME] error on $FQHOSTNAME" $EMAIL
+        LOG "$(cat "$TMPFILE")"
+        cleanup_and_exit 1
+    fi
+    popd 1>/dev/null
+    chmod 750 "$BACKUPDIR/$DATE"
+	if [ -n "$RETENTION" -a "$RETENTION" -gt 0 ]; then
+		LOG "removing backups older than $RETENTION days"
+		find "$BACKUPDIR" -ctime +$RETENTION -print0 | xargs -0 rm -rf {} | grep -v "No such file or directory" 
+	fi
+    LOG "backup finished"
+    cleanup_and_exit 0
+  ;;
+  *)
+    cleanup_and_exit 0
+  ;;
+esac

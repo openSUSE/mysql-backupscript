@@ -1,0 +1,25 @@
+Hi
+
+This is a very simple backup script for your mysql database.
+
+This script expects a file /root/.my.cnf containing at least
+the following information:
+--------------------------[snip]
+[client]
+user = root
+password = <password>
+--------------------------[snap]
+
+The file should be read/writeable only for root 
+(-rw------- permissions).
+
+(Note: you won't run a mysql server without a password set for 
+       your administrator account!
+       Try "mysql_secure_installation" to secure your 
+       installation.)
+
+Afterwards, configure your database backup via YaST2 -> 
+/etc/sysconfig-Editor or edit /etc/sysconfig/mysql-backupscript 
+directly with your preferred editor.
+
+Have a lot of fun!
