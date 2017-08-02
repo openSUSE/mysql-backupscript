@@ -15,7 +15,7 @@ MYSQL="/usr/bin/mysql"
 DISTCONFIG="/etc/sysconfig/mysql-backupscript"
 ##################################################
 # Default/Fallback values
-# Don't change them here! Use $DISCONFIG instead
+# Don't change them here! Use $DISTCONFIG instead
 ##################################################
 BACKUPDIR="/root/backup/db"
 FQHOSTNAME=`hostname -f`
